@@ -1,20 +1,56 @@
 import numpy as np
+import psycopg2
 import tensorflow.compat.v1 as tf
+from psycopg2 import OperationalError
 tf.disable_v2_behavior()
 
+# DB
+
+
+def create_connection(db_name, db_user, db_password, db_host, db_port):
+    conn = None
+    try:
+        conn = psycopg2.connect(
+            database=db_name,
+            user=db_user,
+            password=db_password,
+            host=db_host,
+            port=db_port,
+        )
+        print("Connection to PostgreSQL DB successful")
+    except OperationalError as e:
+        print(f"The error '{e}' occurred")
+    return conn
+
+
+def execute_read_query(conn, query):
+    cursor = conn.cursor()
+    result = None
+    try:
+        cursor.execute(query)
+        result = cursor.fetchall()
+        return result
+    except OperationalError as e:
+        print(f"The error '{e}' occurred")
+
+
+connection = create_connection("smartrecipes", "postgres", "postgres", "localhost", "5432")
 
 # CORPUS (INPUT)
 
-corpus_raw = 'He is the king . The king is royal . She is the royal  queen '.lower()
+# corpus_raw = 'He is the king . The king is royal . She is the royal  queen '.lower()
+
+foodstuff_id_results = execute_read_query(connection, "SELECT id FROM dbo.foodstuff")
+words = list(map(lambda r: r[0], foodstuff_id_results))
 
 # CREATE WORD-INT MORPHISM
 
-words = []
-for word in corpus_raw.split():
-    if word != '.':
-        words.append(word)
-
-words = set(words)
+# words = []
+# for word in corpus_raw.split():
+#     if word != '.':
+#         words.append(word)
+#
+# words = set(words)
 
 word2int = {}
 int2word = {}
@@ -26,22 +62,28 @@ for i, word in enumerate(words):
 
 # CREATE SENTENCES (aka DOCUMENTS)
 
-raw_sentences = corpus_raw.split('.')
-sentences = []
-for sentence in raw_sentences:
-    sentences.append(sentence.split())
+# raw_sentences = corpus_raw.split('.')
+# sentences = []
+# for sentence in raw_sentences:
+#     sentences.append(sentence.split())
 
 # GENERATE TRAINING DATA
 # I can probably get this data very easily I just take all tuples from all recipes of recipe ids
 
-data = []
-WINDOW_SIZE = 2
-
-for sentence in sentences:
-    for word_index, word in enumerate(sentence):
-        for nb_word in sentence[max(word_index - WINDOW_SIZE, 0) : min(word_index + WINDOW_SIZE, len(sentence)) + 1] :
-            if nb_word != word:
-                data.append([word, nb_word])
+ingredient_tuple_results = execute_read_query(connection, """
+    SELECT a.foodstuffid, b.foodstuffid
+    FROM dbo.ingredient a
+    INNER JOIN dbo.ingredient b ON b.recipeid = a.recipeid AND b.foodstuffid <> a.foodstuffid AND a.foodstuffid > b.foodstuffid
+    LIMIT 10000
+""")
+data = list(map(lambda r: [r[0], r[1]], ingredient_tuple_results))
+# WINDOW_SIZE = 2
+#
+# for sentence in sentences:
+#     for word_index, word in enumerate(sentence):
+#         for nb_word in sentence[max(word_index - WINDOW_SIZE, 0) : min(word_index + WINDOW_SIZE, len(sentence)) + 1] :
+#             if nb_word != word:
+#                 data.append([word, nb_word])
 
 # TRANSFORM DATA TO ONE-HOT ENCODED TUPLES
 
@@ -89,7 +131,8 @@ cross_entropy_loss = tf.reduce_mean(-tf.reduce_sum(y_label * tf.log(prediction),
 
 # define the training step:
 train_step = tf.train.GradientDescentOptimizer(0.1).minimize(cross_entropy_loss)
-n_iters = 10000
+#n_iters = 10000
+n_iters = 100
 
 # train for n_iter iterations
 for _ in range(n_iters):
@@ -118,7 +161,10 @@ def find_closest(word_index, vectors):
             min_index = index
     return min_index
 
-print(int2word[find_closest(word2int['king'], vectors)])
+
+# Pepper, shoudl be similar to salt (cc8f46dd-27a3-4042-8b25-459f6d4a3679)
+print(int2word[find_closest(word2int['2c6d80e8-f3ef-4845-bfc2-bd8e84c86bd9'], vectors)])
+print(int2word[find_closest(word2int['cc8f46dd-27a3-4042-8b25-459f6d4a3679'], vectors)])
 
 # VISUALIZE
 
