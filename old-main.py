@@ -3,7 +3,6 @@ import psycopg2
 import tensorflow.compat.v1 as tf
 from psycopg2 import OperationalError
 import datetime
-
 tf.disable_v2_behavior()
 
 # DB
